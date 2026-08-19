@@ -24,21 +24,25 @@ macOS 构建后 `build/` 下即自包含：`nef2jpg` + `lib/`（SDK 动态库、
 nef2jpg [选项] <输入...>
 
   输入                 .NEF 文件 / glob / 目录（-r 递归）
-  -o, --out-dir DIR    输出目录
-  -j, --jobs N         并发数（默认 min(CPU核数,8)，并按内存自动封顶；上限 64）
-  -q, --quality N      JPEG 质量 1-100（默认 90）
-  -s, --target-size S  单张目标大小（500K / 1M / 2.5M），质量二分逼近
+  -o, --out-dir DIR    输出目录（默认：与输入同目录，自动创建）
+  -j, --jobs N         并发数（默认 min(CPU核数,8)，内存自动封顶，上限 64）
+  -q, --quality N      JPEG 质量 1-100（默认 90；仅无 -s 时生效）
+  -s, --target-size S  单张目标大小（500K / 1M / 2.5M），以 -q 为起点二分逼近
       --max-size S     硬上限（无法满足时告警）
   -t, --tolerance PCT  目标大小容差 %（默认 5，上限 100）
-      --progressive    渐进式 JPEG
-      --subsampling N  420 / 422 / 444
-      --no-icc         不嵌入 sRGB ICC
-  -w, --resize N       最大边缩到 N 像素
-      --no-auto-orient 不按 EXIF 自动旋转
+      --progressive    渐进式 JPEG（边下载边显示；默认基线式）
+      --subsampling N  色度子采样 420 / 422 / 444（默认 420）
+      --icc FILE       嵌入自定义 ICC（如 Adobe RGB/Display P3；与 --no-icc 互斥）
+      --no-icc         不嵌入 ICC（默认嵌入 sRGB）
+  -w, --resize N       最大边缩到 N 像素（保持宽高比）
+      --no-auto-orient 不按 EXIF 自动旋转（默认自动转正）
       --dry-run        只预览任务
-      --overwrite      覆盖已存在输出
+      --overwrite      覆盖已存在输出（默认跳过）
   -v, --verbose        详细输出（含分阶段耗时）
 ```
+
+**参数优先级**：`--max-size`（硬上限）> `--target-size`（自动选质量）> `--quality`。
+即：给了 `-s` 时 `-q` 只作为二分起点；`--max-size` 会在前两者结果之上继续压质量。
 
 退出码：`0` 全部成功 / `1` 部分失败 / `2` 用法错误 / `130` 被中断（Ctrl-C，worker 完成当前文件后停止，输出已完成的文件完整落盘）。
 

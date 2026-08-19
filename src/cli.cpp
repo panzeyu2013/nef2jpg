@@ -82,38 +82,52 @@ void printUsage(FILE *fp) {
         "\n"
         "Usage: nef2jpg [options] <input>...\n"
         "\n"
-        "  Inputs: one or more .NEF files, globs, or directories (-r to recurse)\n"
+        "输入\n"
+        "  <input...>          一个或多个 .NEF 文件 / glob / 目录\n"
+        "  -r, --recursive     递归扫描目录内的 .NEF\n"
+        "      --dry-run       只预览任务，不执行\n"
         "\n"
-        "  Output\n"
-        "    -o, --out-dir DIR     output directory (default: same as input)\n"
-        "        --overwrite       overwrite existing files (default: skip)\n"
-        "        --suffix STR      output suffix (default: _decoded)\n"
+        "输出\n"
+        "  -o, --out-dir DIR   输出目录（默认：与输入同目录；不存在会自动创建）\n"
+        "      --overwrite     覆盖已存在的输出（默认：跳过）\n"
+        "      --suffix STR    输出文件名后缀（默认: _decoded）\n"
         "\n"
-        "  Concurrency\n"
-        "    -j, --jobs N          worker threads (default: min(CPU cores, 8); "
-        "auto-capped by RAM)\n"
+        "并发\n"
+        "  -j, --jobs N        并发 worker 数（默认: min(CPU核数,8)，并按内存自动封顶；上限 64）\n"
         "\n"
-        "  JPEG\n"
-        "    -q, --quality 0-100   JPEG quality (default 90)\n"
-        "    -s, --target-size S   per-image target size, e.g. 500K / 1M / 2.5M\n"
-        "        --max-size S      hard size cap\n"
-        "    -t, --tolerance PCT   target-size tolerance %% (default 5, max 100)\n"
-        "        --progressive     progressive JPEG\n"
-        "        --subsampling N   420 / 422 / 444 (default 420)\n"
-        "        --no-icc          do not embed sRGB ICC profile\n"
+        "JPEG 质量与大小（优先级: --max-size > --target-size > --quality）\n"
+        "  -q, --quality N     JPEG 质量 1-100（默认: 90）。仅在没有 -s 时生效\n"
+        "  -s, --target-size S 单张目标大小，如 500K / 1M / 2.5M。自动在质量上二分搜索逼近目标，\n"
+        "                      此时 -q 作为二分起点（仍会被调整）\n"
+        "      --max-size S    硬上限：超出则继续降质量直到满足或质量=1；无法满足时告警\n"
+        "  -t, --tolerance PCT 目标大小容差 %%（默认: 5，上限 100）\n"
         "\n"
-        "  Image\n"
-        "    -w, --resize MAXDIM   downscale so max side <= MAXDIM px\n"
-        "        --no-auto-orient  do not auto-rotate by EXIF orientation\n"
+        "JPEG 编码\n"
+        "      --progressive   渐进式编码：浏览器/看图软件可边下载边显示，文件稍大且部分\n"
+        "                      老旧软件兼容性略差；默认关闭（基线式，兼容性最好）\n"
+        "      --subsampling N 色度子采样 420 / 422 / 444（默认: 420）。\n"
+        "                      420 体积最小，但精细彩色边缘（如红字、发丝）可能轻微渗色；\n"
+        "                      444 无色度压缩、细节最锐、体积最大；422 折中。照片一般 420 即可\n"
+        "      --no-icc        不嵌入色彩配置文件（默认嵌入 sRGB，保证看图软件颜色正确）\n"
+        "      --icc FILE      嵌入自定义 ICC 配置文件（如 Adobe RGB / Display P3，\n"
+        "                      文件需 1-65519 字节；与 --no-icc 互斥）\n"
         "\n"
-        "  Misc\n"
-        "        --backend NAME    decode backend: auto | sdk (v1)\n"
-        "    -r, --recursive       scan directories recursively\n"
-        "        --dry-run         print jobs without processing\n"
-        "    -v, --verbose         verbose output\n"
-        "    -h, --help            this help\n"
+        "图像\n"
+        "  -w, --resize N      最大边缩到 N 像素（保持宽高比，只缩小不放大）\n"
+        "      --no-auto-orient  不按 EXIF 方向自动转正（默认自动转正）\n"
         "\n"
-        "Exit codes: 0 all ok, 1 partial failure, 2 usage error, 130 interrupted\n",
+        "其他\n"
+        "      --backend NAME  解码后端：auto | sdk（默认: auto）\n"
+        "  -v, --verbose       详细输出（含 open/decode/encode/exif 分阶段耗时）\n"
+        "  -h, --help          显示本帮助\n"
+        "\n"
+        "退出码: 0 全部成功 / 1 部分失败 / 2 用法错误 / 130-143 被中断(Ctrl-C)\n"
+        "\n"
+        "示例:\n"
+        "  nef2jpg photo.NEF\n"
+        "  nef2jpg -j 4 -s 1M -o out/ *.NEF\n"
+        "  nef2jpg -r -w 2000 --progressive -o out/ photos/\n"
+        "  nef2jpg --icc DisplayP3.icc --q 95 photo.NEF\n",
         NEF2JPG_VERSION);
 }
 
@@ -165,6 +179,9 @@ CliResult parseCli(int argc, char **argv, Options *opts, std::string *err) {
             opts->subsampling = n;
         } else if (a == "--no-icc") {
             opts->embed_icc = false;
+        } else if (a == "--icc") {
+            const char *v = needValue("--icc"); if (!v) return CliResult::Error;
+            opts->icc_path = v;
         } else if (a == "-w" || a == "--resize") {
             const char *v = needValue("--resize"); if (!v) return CliResult::Error;
             if (!readIntStrict(v, &opts->resize_max_dim) || opts->resize_max_dim <= 0)
@@ -211,6 +228,19 @@ CliResult parseCli(int argc, char **argv, Options *opts, std::string *err) {
         int memCap = (int)(memMB / 512);
         if (memCap < 1) memCap = 1;
         if (opts->jobs > memCap) opts->jobs = memCap;
+    }
+
+    // --icc 校验：与 --no-icc 互斥；文件存在且 ≤65519 字节（JPEG APP2 单 chunk 上限）
+    if (!opts->icc_path.empty()) {
+        if (!opts->embed_icc)
+            return fail("--icc and --no-icc are mutually exclusive");
+        FILE *f = fopen(opts->icc_path.c_str(), "rb");
+        if (!f) return fail("--icc file not found: " + opts->icc_path);
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fclose(f);
+        if (n <= 0 || n > 65519)
+            return fail("--icc file must be 1..65519 bytes");
     }
     return CliResult::Ok;
 }

@@ -173,8 +173,22 @@ long encodeOnce(const DecodedImage &img, int quality, const JpegOptions &opt,
 
 } // namespace
 
-std::vector<uint8_t> loadSrgbIccProfile() {
-    // 优先系统 profiles 目录；其次可执行文件旁的 Contents/Resources
+std::vector<uint8_t> loadIccProfile(const std::string &path) {
+    if (!path.empty()) {
+        FILE *f = fopen(path.c_str(), "rb");
+        if (!f) return {};
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        std::vector<uint8_t> v;
+        if (n > 0 && n < 65519) {
+            v.resize((size_t)n);
+            if (fread(v.data(), 1, (size_t)n, f) != (size_t)n) v.clear();
+        }
+        fclose(f);
+        return v;
+    }
+    // 默认 sRGB：优先系统 profiles 目录；其次可执行文件旁的 Contents/Resources
     const char *sysPath = "/Library/Application Support/Nikon/Profiles/NKsRGB.icm";
     FILE *f = fopen(sysPath, "rb");
     if (!f) {
@@ -206,7 +220,11 @@ std::vector<uint8_t> loadSrgbIccProfile() {
 
 bool encodeJpeg(const DecodedImage &img, const std::string &path,
                 const JpegOptions &opt, std::string *err) {
-    std::vector<uint8_t> icc = opt.embedIcc ? loadSrgbIccProfile() : std::vector<uint8_t>{};
+    std::vector<uint8_t> icc;
+    if (!opt.iccPath.empty())
+        icc = loadIccProfile(opt.iccPath);
+    else if (opt.embedIcc)
+        icc = loadIccProfile("");
     std::vector<uint8_t> out;
 
     int quality = opt.quality;
@@ -214,14 +232,14 @@ bool encodeJpeg(const DecodedImage &img, const std::string &path,
     std::vector<uint8_t> finalBuf; // target-size 模式下复用已探明的最终缓冲
 
     if (opt.targetSize > 0) {
-        // 目标大小：二分搜索质量；命中容差直接复用该次缓冲
+        // 目标大小：以 -q 为起点做二分搜索；命中容差直接复用该次缓冲
         int lo = 2, hi = 100;
         long bestSize = -1;
         int64_t target = opt.targetSize;
         int64_t tol = (int64_t)(target * opt.tolerancePct / 100);
         if (tol < 1) tol = 1;
-        for (int iter = 0; iter < 7 && lo <= hi; ++iter) {
-            int q = (lo + hi) / 2;
+        int q = quality;
+        for (int iter = 0; iter < 8 && lo <= hi; ++iter) {
             long s = encodeOnce(img, q, opt, icc, &out, err);
             if (s < 0) return false;
             if (bestSize < 0 ||
@@ -232,6 +250,7 @@ bool encodeJpeg(const DecodedImage &img, const std::string &path,
             if (llabs((long long)s - target) <= tol) break;
             if (s > target) hi = q - 1;
             else lo = q + 1;
+            q = (lo + hi) / 2;
         }
         size = bestSize;
         out.swap(finalBuf); // out 恢复为最接近目标质量的缓冲

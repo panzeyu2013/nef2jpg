@@ -19,13 +19,14 @@ struct Options {
     int jobs = 0; // 0 = auto (hardware concurrency)
 
     // jpeg
-    int quality = 90;            // 1..100
+    int quality = 90;            // 1..100；-s 时作为二分起点
     int64_t target_size = 0;     // 0 = off
     int64_t max_size = 0;        // 0 = off
     int tolerance_pct = 5;       // target-size tolerance
     bool progressive = false;
     int subsampling = 420;       // 420 / 422 / 444
     bool embed_icc = true;
+    std::string icc_path;        // 自定义 ICC 文件（空 = 默认 sRGB）
 
     // image processing
     int resize_max_dim = 0;      // 0 = off

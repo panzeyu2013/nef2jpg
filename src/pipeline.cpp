@@ -96,6 +96,7 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
         jopt.progressive = opts.progressive;
         jopt.subsampling = opts.subsampling;
         jopt.embedIcc = opts.embed_icc;
+        jopt.iccPath = opts.icc_path;
         jopt.targetSize = opts.target_size;
         jopt.maxSize = opts.max_size;
         jopt.tolerancePct = opts.tolerance_pct;
