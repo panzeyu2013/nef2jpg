@@ -20,25 +20,45 @@ macOS 构建后 `build/` 下即自包含：`nef2jpg` + `lib/`（SDK 动态库、
 
 ## 用法
 
+完整帮助见 `nef2jpg -h`，要点如下：
+
 ```
 nef2jpg [选项] <输入...>
 
-  输入                 .NEF 文件 / glob / 目录（-r 递归）
-  -o, --out-dir DIR    输出目录（默认：与输入同目录，自动创建）
-  -j, --jobs N         并发数（默认 min(CPU核数,8)，内存自动封顶，上限 64）
-  -q, --quality N      JPEG 质量 1-100（默认 90；无 -s 时作为最终质量，有 -s 时仅作二分起点）
-  -s, --target-size S  单张目标大小（500K / 1M / 2.5M），以 -q 为起点二分逼近
-      --max-size S     硬上限（无法满足时告警）
-  -t, --tolerance PCT  目标大小容差 %（默认 5，上限 100）
-      --progressive    渐进式 JPEG（边下载边显示；默认基线式）
-      --subsampling N  色度子采样 420 / 422 / 444（默认 420）
-      --icc FILE       嵌入自定义 ICC（如 Adobe RGB/Display P3；与 --no-icc 互斥）
-      --no-icc         不嵌入 ICC（默认嵌入 sRGB）
-  -w, --resize N       最大边缩到 N 像素（保持宽高比）
-      --no-auto-orient 不按 EXIF 自动旋转（默认自动转正）
-      --dry-run        只预览任务
-      --overwrite      覆盖已存在输出（默认跳过）
-  -v, --verbose        详细输出（含分阶段耗时）
+输入
+  <input...>          一个或多个 .NEF 文件 / glob / 目录
+  -r, --recursive     递归扫描目录内的 .NEF
+      --dry-run       只预览任务，不执行
+
+输出
+  -o, --out-dir DIR   输出目录（默认：与输入同目录，不存在自动创建）
+      --overwrite     覆盖已存在输出（默认：跳过）
+      --suffix STR    输出文件名后缀（默认: _decoded）
+
+并发
+  -j, --jobs N        并发 worker 数（默认: min(CPU核数,8)，并按内存自动封顶；上限 64）
+
+JPEG 质量与大小（优先级: --max-size > --target-size > --quality）
+  -q, --quality N     JPEG 质量 1-100（默认: 90）。无 -s 时作为最终质量；有 -s 时仅作二分起点
+  -s, --target-size S 单张目标大小，如 500K / 1M / 2.5M，以 -q 为起点二分逼近
+      --max-size S    硬上限（无法满足时告警）
+  -t, --tolerance PCT 目标大小容差 %（默认: 5，上限 100）
+
+JPEG 编码
+      --progressive   渐进式编码（边下载边显示；默认基线式，兼容性最好）
+      --subsampling N 色度子采样 420 / 422 / 444（默认: 420）。420 体积最小但精细
+                      彩色边缘可能轻微渗色；444 细节最锐体积最大；422 折中
+      --icc FILE      嵌入自定义 ICC（如 Adobe RGB/Display P3，1-65519 字节；与 --no-icc 互斥）
+      --no-icc        不嵌入 ICC（默认嵌入 sRGB）
+
+图像
+  -w, --resize N      最大边缩到 N 像素（保持宽高比，只缩小）
+      --no-auto-orient 不按 EXIF 自动转正（默认自动转正）
+
+其他
+      --backend NAME  解码后端：auto | sdk（默认: auto）
+  -v, --verbose       详细输出（含 open/decode/encode/exif 分阶段耗时）
+  -h, --help          显示帮助
 ```
 
 **参数优先级**：`--max-size`（硬上限）> `--target-size`（自动选质量）> `--quality`。
@@ -67,6 +87,10 @@ nef2jpg photo.NEF
 nef2jpg -j 4 -s 1M -o out/ *.NEF
 # 目录递归 + 缩图
 nef2jpg -r -w 2000 -o out/ photos/
+# 自定义 ICC + 渐进式
+nef2jpg --icc DisplayP3.icc --progressive photo.NEF
+# 预览任务（不执行）
+nef2jpg --dry-run -r photos/
 ```
 
 ## 发布说明（面向分发者）
