@@ -1,0 +1,121 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      sdk_tarball_url:
+        description: "Nikon Image SDK Mac 压缩包 URL（私有存储，含 Include/、Sample/Lib/release/、Sample/Resources/、Profiles/）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SDK_TARBALL_URL: ${{ inputs.sdk_tarball_url || vars.SDK_TARBALL_URL }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            artifact: nef2jpg-macos-arm64
+          - os: ubuntu-24.04
+            artifact: nef2jpg-linux-x64
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libjpeg-turbo exiv2 cmake
+
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libjpeg-turbo8-dev libexiv2-dev
+
+      - name: Fetch Nikon SDK (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if [ -z "$SDK_TARBALL_URL" ]; then
+            echo "::error::macOS 构建需要尼康 SDK。请在 workflow_dispatch 输入 sdk_tarball_url 或设置仓库变量 SDK_TARBALL_URL（指向含 Include/、Sample/ 的 Mac SDK 压缩包）"
+            exit 1
+          fi
+          curl -sL -o /tmp/nikonsdk.tar.gz "$SDK_TARBALL_URL"
+          mkdir -p /tmp/nikonsdk
+          tar -xzf /tmp/nikonsdk.tar.gz -C /tmp/nikonsdk
+
+      - name: Configure
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cmake -B build -DCMAKE_BUILD_TYPE=Release -DNIKON_SDK_DIR=/tmp/nikonsdk
+          else
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Stage (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p stage/${{ matrix.artifact }}/lib \
+                   stage/${{ matrix.artifact }}/Contents/Resources \
+                   stage/${{ matrix.artifact }}/scripts
+          cp build/nef2jpg stage/${{ matrix.artifact }}/
+          cp -R build/lib/* stage/${{ matrix.artifact }}/lib/
+          cp build/Contents/Resources/prm.bin stage/${{ matrix.artifact }}/Contents/Resources/
+          cp scripts/install_profiles.sh stage/${{ matrix.artifact }}/scripts/
+          cp README.md stage/${{ matrix.artifact }}/
+          codesign --force --deep --sign - stage/${{ matrix.artifact }}/nef2jpg || true
+
+      - name: Stage (Linux placeholder)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p stage/${{ matrix.artifact }}
+          cp build/nef2jpg stage/${{ matrix.artifact }}/
+          cp README.md stage/${{ matrix.artifact }}/
+
+      - name: Package
+        run: |
+          cd stage
+          tar -czf ../${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            shasum -a 256 ../${{ matrix.artifact }}.tar.gz > ../${{ matrix.artifact }}.sha256
+          else
+            sha256sum ../${{ matrix.artifact }}.tar.gz > ../${{ matrix.artifact }}.sha256
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.sha256
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/**/*.tar.gz
+            dist/**/*.sha256
+          generate_release_notes: true
