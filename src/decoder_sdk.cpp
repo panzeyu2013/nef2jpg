@@ -65,7 +65,10 @@ unsigned long ensureLibraryOpen() {
     } catch (...) {
         err = kNkfl_Code_Err_Unexpected;
     }
-    if (err != kNkfl_Code_None) return err;
+    if (err != kNkfl_Code_None) {
+        if (!g_swapPath.empty()) { unlink(g_swapPath.c_str()); g_swapPath.clear(); }
+        return err;
+    }
 
     // 与官方示例一致：机内处理优先
     NkflDevelopColorMode mode = {};
@@ -121,8 +124,10 @@ std::string dateTimeString(unsigned long sid) {
         if (Nkfl_Entry(kNkfl_Cmd_GetTagData, &p) != kNkfl_Code_None) return "";
         if (dt.ulYear == 0 && dt.ulMonth == 0 && dt.ulDay == 0) return "";
         char b[64];
-        snprintf(b, sizeof b, "%04lu:%02lu:%02lu %02lu:%02lu:%05.2f",
-                 dt.ulYear, dt.ulMonth, dt.ulDay, dt.ulHour, dt.ulMinute, dt.dbSecond);
+        // EXIF DateTime 标准格式不含小数秒：YYYY:MM:DD HH:MM:SS
+        snprintf(b, sizeof b, "%04lu:%02lu:%02lu %02lu:%02lu:%02lu",
+                 dt.ulYear, dt.ulMonth, dt.ulDay, dt.ulHour, dt.ulMinute,
+                 (unsigned long)(dt.dbSecond + 0.5));
         return b;
     } catch (...) { return ""; }
 }
@@ -267,7 +272,7 @@ bool SdkDecoder::decode(DecodedImage *out, bool autoOrient, std::string *err) {
 
     size_t w = oi.ulWidth, h = oi.ulHeight;
     size_t dataLen = w * h * oi.ulByteDepth * 3;
-    if (dataLen > (size_t)1 << 30) // 上限 1GB 输出缓冲
+    if (dataLen > (size_t)512 << 20) // 上限 512MB（与 -j 内存封顶假设一致，防恶意尺寸 OOM）
         return fail("decoded image buffer too large");
 
     out->rgb.resize(dataLen);

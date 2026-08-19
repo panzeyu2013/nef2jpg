@@ -96,7 +96,8 @@ void printUsage(FILE *fp) {
         "  -j, --jobs N        并发 worker 数（默认: min(CPU核数,8)，并按内存自动封顶；上限 64）\n"
         "\n"
         "JPEG 质量与大小（优先级: --max-size > --target-size > --quality）\n"
-        "  -q, --quality N     JPEG 质量 1-100（默认: 90）。仅在没有 -s 时生效\n"
+        "  -q, --quality N     JPEG 质量 1-100（默认: 90）。无 -s 时作为最终质量；\n"
+        "                      有 -s 时仅作为二分起点（仍会被调整）\n"
         "  -s, --target-size S 单张目标大小，如 500K / 1M / 2.5M。自动在质量上二分搜索逼近目标，\n"
         "                      此时 -q 作为二分起点（仍会被调整）\n"
         "      --max-size S    硬上限：超出则继续降质量直到满足或质量=1；无法满足时告警\n"
@@ -121,13 +122,13 @@ void printUsage(FILE *fp) {
         "  -v, --verbose       详细输出（含 open/decode/encode/exif 分阶段耗时）\n"
         "  -h, --help          显示本帮助\n"
         "\n"
-        "退出码: 0 全部成功 / 1 部分失败 / 2 用法错误 / 130-143 被中断(Ctrl-C)\n"
+        "退出码: 0 全部成功 / 1 部分失败 / 2 用法错误 / 130 (Ctrl-C) / 143 (SIGTERM)\n"
         "\n"
         "示例:\n"
         "  nef2jpg photo.NEF\n"
         "  nef2jpg -j 4 -s 1M -o out/ *.NEF\n"
         "  nef2jpg -r -w 2000 --progressive -o out/ photos/\n"
-        "  nef2jpg --icc DisplayP3.icc --q 95 photo.NEF\n",
+        "  nef2jpg --icc DisplayP3.icc -q 95 photo.NEF\n",
         NEF2JPG_VERSION);
 }
 
@@ -181,6 +182,7 @@ CliResult parseCli(int argc, char **argv, Options *opts, std::string *err) {
             opts->embed_icc = false;
         } else if (a == "--icc") {
             const char *v = needValue("--icc"); if (!v) return CliResult::Error;
+            if (v[0] == '\0') return fail("--icc requires a non-empty file path");
             opts->icc_path = v;
         } else if (a == "-w" || a == "--resize") {
             const char *v = needValue("--resize"); if (!v) return CliResult::Error;

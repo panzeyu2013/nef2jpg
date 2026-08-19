@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(nef2jpg VERSION 1.0.0 LANGUAGES CXX)
+
+if(APPLE)
+  # 固定部署目标（必须在 project() 之前设置，否则 CACHE 写入无效，产物 minos 会随本机构建 SDK 浮动）
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "macOS deployment target")
+endif()
+
+project(nef2jpg VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,11 +13,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
-endif()
-
-if(APPLE)
-  # 固定部署目标，避免随本机构建 SDK 浮动
-  set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "macOS deployment target")
 endif()
 
 option(NEF2JPG_WITH_EXIF "Build with EXIF writing support (exiv2)" ON)
@@ -98,7 +99,8 @@ if(APPLE)
     "-framework CoreFoundation"
     "-framework CoreGraphics")
   target_link_options(nef2jpg PRIVATE
-    "-Wl,-rpath,@executable_path/lib")
+    "-Wl,-rpath,@executable_path/lib"
+    "-Wl,-w") # 压制 ld 版本警告：brew 静态对象按构建机系统构建（mina 高于部署目标，无害）
 
   # ---- copy SDK runtime files + 自包含动态库 fixup ----
   set(SDK_LIB_DIR "${NIKON_SDK_DIR}/Sample/Lib/release")

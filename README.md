@@ -26,7 +26,7 @@ nef2jpg [选项] <输入...>
   输入                 .NEF 文件 / glob / 目录（-r 递归）
   -o, --out-dir DIR    输出目录（默认：与输入同目录，自动创建）
   -j, --jobs N         并发数（默认 min(CPU核数,8)，内存自动封顶，上限 64）
-  -q, --quality N      JPEG 质量 1-100（默认 90；仅无 -s 时生效）
+  -q, --quality N      JPEG 质量 1-100（默认 90；无 -s 时作为最终质量，有 -s 时仅作二分起点）
   -s, --target-size S  单张目标大小（500K / 1M / 2.5M），以 -q 为起点二分逼近
       --max-size S     硬上限（无法满足时告警）
   -t, --tolerance PCT  目标大小容差 %（默认 5，上限 100）
@@ -44,7 +44,7 @@ nef2jpg [选项] <输入...>
 **参数优先级**：`--max-size`（硬上限）> `--target-size`（自动选质量）> `--quality`。
 即：给了 `-s` 时 `-q` 只作为二分起点；`--max-size` 会在前两者结果之上继续压质量。
 
-退出码：`0` 全部成功 / `1` 部分失败 / `2` 用法错误 / `130` 被中断（Ctrl-C，worker 完成当前文件后停止，输出已完成的文件完整落盘）。
+退出码：`0` 全部成功 / `1` 部分失败 / `2` 用法错误 / `130` (Ctrl-C) / `143` (SIGTERM)（中断时 worker 完成当前文件后停止，已完成的输出完整落盘）。
 
 ## macOS 运行前提
 
@@ -72,6 +72,7 @@ nef2jpg -r -w 2000 -o out/ photos/
 ## 发布说明（面向分发者）
 
 - **自包含**：macOS 发布包解压即用（`lib/` 已打包全部动态库、`Contents/Resources/prm.bin`、`Profiles/`），无需目标机 Homebrew。
+- **系统要求**：当前发布包要求 **macOS 26+**（brew 依赖 libexiv2/brotli 按构建机系统编译，其 minos 为 26.0；若需支持更早系统，需自行以更低部署目标构建这些依赖）。
 - **手动发布**：本地 `cmake --build build` 后，打包 `build/nef2jpg + build/lib + build/Contents/Resources/prm.bin + Profiles + scripts + README` 为 tar.gz，手动上传到 GitHub Release 即可（无需 CI）。
 - **签名/公证**：本地产物为 adhoc 签名。正式分发建议用 Developer ID 签名并公证（`codesign` + `notarytool`），否则用户需右键打开或 `xattr -d com.apple.quarantine`。
 - **许可**：尼康 Image SDK 为授权产品，随包再分发前请核对 SDK 许可协议；exiv2 为 LGPL-2.1；libjpeg-turbo 为 IJG/BSD 类许可。源码发布不受影响。

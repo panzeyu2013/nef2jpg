@@ -60,6 +60,7 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
         fprintf(stderr, "[WARN] %s: %s\n", sanitizeName(job.input).c_str(), m.c_str());
     };
 
+    std::string encPath, exifPath; // 临时文件路径（try 外声明，异常时 catch 可清理）
     try {
         using Clock = std::chrono::steady_clock;
         auto t0 = Clock::now();
@@ -107,8 +108,8 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
         int fd = mkstemp(tmpl);
         if (fd < 0) { fail("cannot create temp file for output"); return; }
         close(fd);
-        std::string encPath = tmpl;          // 编码产物
-        std::string exifPath = encPath + ".x"; // EXIF 副本
+        encPath = tmpl;                        // 编码产物
+        exifPath = encPath + ".x";             // EXIF 副本
 
         if (!encodeJpeg(img, encPath, jopt, &err)) {
             unlink(encPath.c_str());
@@ -131,6 +132,7 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
                 }
             } else {
                 warn("exif copy: " + exifErr);
+                unlink(exifPath.c_str());
             }
         }
         auto tExif = Clock::now();
@@ -171,8 +173,12 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
             }
         }
     } catch (const std::exception &e) {
+        if (!encPath.empty()) unlink(encPath.c_str());
+        if (!exifPath.empty()) unlink(exifPath.c_str());
         fail(std::string("exception: ") + e.what());
     } catch (...) {
+        if (!encPath.empty()) unlink(encPath.c_str());
+        if (!exifPath.empty()) unlink(exifPath.c_str());
         fail("unknown exception");
     }
 }

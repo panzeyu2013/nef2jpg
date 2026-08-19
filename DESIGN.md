@@ -39,18 +39,19 @@
 ### JPEG 输出（libjpeg-turbo：macOS 静态链接，Linux 动态）
 | 参数 | 说明 |
 |---|---|
-| `-q, --quality 0-100` | 固定质量（默认 90） |
+| `-q, --quality 1-100` | 质量（默认 90）；无 `-s` 时作为最终质量，有 `-s` 时仅作二分起点 |
 | `-s, --target-size SIZE` | 单张目标大小（`500K` / `1M` / `2.5M`），对质量做二分搜索逼近（容差 `-t`，默认 5%） |
 | `--max-size SIZE` | 硬上限：超出则降质量重试直到满足或质量到 1（无法满足时告警） |
 | `--progressive` | 渐进式 JPEG |
 | `--subsampling 420/422/444` | 色度子采样（默认 420） |
-| `--no-icc` | 不嵌入 sRGB ICC 配置（默认嵌入） |
+| `--icc FILE` | 嵌入自定义 ICC 配置文件（与 `--no-icc` 互斥，1-65519 字节） |
+| `--no-icc` | 不嵌入 ICC 配置（默认嵌入 sRGB） |
 | `--suffix STR` | 输出文件名后缀（默认 `_decoded`） |
 
 ### 并发与容错
 - `-j N` 个 worker 线程；每个 worker 独立完成一张图的整条流水线（解码器/编码器均线程安全、实例独立）。
 - 单张失败不中断批处理；结束输出统计（成功/失败/总耗时/总大小）。
-- 退出码：`0` 全部成功；`1` 部分失败；`2` 用法错误；`130` 被中断（Ctrl-C，完成当前文件后停止）。
+- 退出码：`0` 全部成功；`1` 部分失败；`2` 用法错误；`130` (Ctrl-C) / `143` (SIGTERM)（完成当前文件后停止）。
 
 ### 元数据
 - EXIF 写入：日期时间、相机型号、镜头等（exiv2，LGPL-2.1，动态库随发布包分发）。v1 从 SDK tag 读取（Make/Model/DateTime/LensInfo）并写入输出 JPEG；自动旋转时 Orientation 写 1，避免二次旋转。
@@ -94,7 +95,7 @@ nef2jpg [选项] <输入...>
     -j, --jobs N          并发 worker 数（默认 min(CPU核数,8)，内存自动封顶，上限 64）
 
   JPEG
-    -q, --quality 0-100   JPEG 质量（默认 90）
+    -q, --quality 1-100   JPEG 质量（默认 90；-s 时作为二分起点）
     -s, --target-size S   单张目标大小，如 500K / 1M
         --max-size S      硬上限
     -t, --tolerance PCT   目标大小容差 %（默认 5，上限 100）
@@ -140,5 +141,5 @@ nef2jpg [选项] <输入...>
 | M1 | 项目骨架 + CLI + 单张/多张 NEF→JPEG（Mac SDK）+ 并发 | ✅ |
 | M2 | 目标大小二分 + max-size + 渐进/子采样/ICC | ✅ |
 | M3 | resize + 自动旋转 + EXIF | ✅ |
-| M4 | 统计/退出码/递归/dry-run + Linux 占位构建 + CI 发布 + README | ✅ |
+| M4 | 统计/退出码/递归/dry-run + Linux 占位构建 + 手动发布流程 + README | ✅ |
 | M5 | 审查修复：setjmp 错误处理/尺寸校验/输出冲突/原子写入/信号/自包含打包 | ✅ |
