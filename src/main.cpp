@@ -10,10 +10,12 @@
 
 namespace {
 std::atomic<bool> g_interrupted{false};
+std::atomic<int> g_signal{0};
 
-void onSignal(int) {
+void onSignal(int sig) {
     // 只置标志；worker 在任务边界检查（信号处理器内不做任何非异步安全调用）
     g_interrupted.store(true);
+    g_signal.store(sig);
 }
 } // namespace
 
@@ -48,11 +50,13 @@ int main(int argc, char **argv) {
     }
 
     // Ctrl-C / SIGTERM：置停止标志，worker 完成当前文件后退出
+    // SA_RESTART：避免系统调用被 EINTR 打断导致在途文件写入不完整
     struct sigaction sa = {};
     sa.sa_handler = onSignal;
+    sa.sa_flags = SA_RESTART;
     sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, nullptr);
-    sigaction(SIGTERM, &sa, nullptr);
+    if (sigaction(SIGINT, &sa, nullptr) != 0 || sigaction(SIGTERM, &sa, nullptr) != 0)
+        fprintf(stderr, "nef2jpg: warning: failed to install signal handler\n");
 
     Summary s = runPipeline(opts, files, &g_interrupted);
 
@@ -63,7 +67,7 @@ int main(int argc, char **argv) {
             (long long)s.totalBytes, s.elapsedSec,
             g_interrupted.load() ? " (interrupted)" : "");
 
-    if (g_interrupted.load()) return 130;      // 128 + SIGINT
+    if (g_interrupted.load()) return 128 + g_signal.load(); // 130(SIGINT) / 143(SIGTERM)
     if (s.failed > 0) return 1;
     return 0;
 }

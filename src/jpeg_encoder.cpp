@@ -100,7 +100,7 @@ long encodeOnce(const DecodedImage &img, int quality, const JpegOptions &opt,
         return -1;
     }
 
-    jpeg_compress_struct cinfo;
+    jpeg_compress_struct cinfo = {}; // 必须清零：create 失败时错误路径要安全读 dest
     JpegErrorMgr jerr;
     cinfo.err = jpeg_std_error(&jerr.pub);
     jerr.pub.error_exit = jpegErrorExit;
@@ -114,49 +114,61 @@ long encodeOnce(const DecodedImage &img, int quality, const JpegOptions &opt,
         return -1;
     }
 
-    jpeg_create_compress(&cinfo);
-    MemDest *dest = new MemDest(out);
-    cinfo.dest = &dest->pub;
+    try {
+        jpeg_create_compress(&cinfo);
+        MemDest *dest = new MemDest(out);
+        cinfo.dest = &dest->pub;
 
-    cinfo.image_width = (JDIMENSION)img.width;
-    cinfo.image_height = (JDIMENSION)img.height;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
-    jpeg_set_defaults(&cinfo);
-    setSubsampling(&cinfo, opt.subsampling);
-    jpeg_set_quality(&cinfo, quality, TRUE);
-    cinfo.progressive_mode = opt.progressive ? TRUE : FALSE;
-    cinfo.dct_method = JDCT_ISLOW;
+        cinfo.image_width = (JDIMENSION)img.width;
+        cinfo.image_height = (JDIMENSION)img.height;
+        cinfo.input_components = 3;
+        cinfo.in_color_space = JCS_RGB;
+        jpeg_set_defaults(&cinfo);
+        setSubsampling(&cinfo, opt.subsampling);
+        jpeg_set_quality(&cinfo, quality, TRUE);
+        cinfo.progressive_mode = opt.progressive ? TRUE : FALSE;
+        cinfo.dct_method = JDCT_ISLOW;
 
-    jpeg_start_compress(&cinfo, TRUE);
+        jpeg_start_compress(&cinfo, TRUE);
 
-    // 嵌入 sRGB ICC（APP2 marker，单 chunk ≤65519 字节）
-    if (opt.embedIcc && !icc.empty()) {
-        if (icc.size() + 14 <= 65533) {
-            std::vector<JOCTET> chunk(14 + icc.size());
-            memcpy(chunk.data(), "ICC_PROFILE\0", 12);
-            chunk[12] = 1; // sequence
-            chunk[13] = 1; // total
-            memcpy(chunk.data() + 14, icc.data(), icc.size());
-            jpeg_write_marker(&cinfo, JPEG_APP0 + 2, chunk.data(),
-                              (unsigned int)chunk.size());
+        // 嵌入 sRGB ICC（APP2 marker，单 chunk ≤65519 字节）
+        if (opt.embedIcc && !icc.empty()) {
+            if (icc.size() + 14 <= 65533) {
+                std::vector<JOCTET> chunk(14 + icc.size());
+                memcpy(chunk.data(), "ICC_PROFILE\0", 12);
+                chunk[12] = 1; // sequence
+                chunk[13] = 1; // total
+                memcpy(chunk.data() + 14, icc.data(), icc.size());
+                jpeg_write_marker(&cinfo, JPEG_APP0 + 2, chunk.data(),
+                                  (unsigned int)chunk.size());
+            }
         }
+
+        // RGB 连续交错，直接按行传指针（libjpeg 不要求行对齐）
+        while (cinfo.next_scanline < cinfo.image_height) {
+            JSAMPROW rowptr[1] = {
+                (JSAMPLE *)(img.rgb.data() + (size_t)cinfo.next_scanline * img.width * 3)
+            };
+            jpeg_write_scanlines(&cinfo, rowptr, 1);
+        }
+
+        jpeg_finish_compress(&cinfo);
+        long size = (long)out->size();
+
+        delete (MemDest *)cinfo.dest;
+        jpeg_destroy_compress(&cinfo);
+        return size;
+    } catch (const std::exception &e) {
+        if (cinfo.dest) delete (MemDest *)cinfo.dest;
+        jpeg_destroy_compress(&cinfo);
+        if (err) *err = std::string("jpeg encode exception: ") + e.what();
+        return -1;
+    } catch (...) {
+        if (cinfo.dest) delete (MemDest *)cinfo.dest;
+        jpeg_destroy_compress(&cinfo);
+        if (err) *err = "jpeg encode exception (unknown)";
+        return -1;
     }
-
-    // RGB 连续交错，直接按行传指针（libjpeg 不要求行对齐）
-    while (cinfo.next_scanline < cinfo.image_height) {
-        JSAMPROW rowptr[1] = {
-            (JSAMPLE *)(img.rgb.data() + (size_t)cinfo.next_scanline * img.width * 3)
-        };
-        jpeg_write_scanlines(&cinfo, rowptr, 1);
-    }
-
-    jpeg_finish_compress(&cinfo);
-    long size = (long)out->size();
-
-    delete (MemDest *)cinfo.dest;
-    jpeg_destroy_compress(&cinfo);
-    return size;
 }
 
 } // namespace

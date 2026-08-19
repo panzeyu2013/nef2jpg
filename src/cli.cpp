@@ -54,15 +54,15 @@ bool parseSize(const std::string &s, int64_t *out) {
     char *end = nullptr;
     double v = std::strtod(num.c_str(), &end);
     if (end == num.c_str() || v < 0) return false;
-    if (v > 9.0e15) return false; // 溢出保护
-    int64_t bytes;
+    double mult;
     switch (unit) {
-        case 'k': bytes = (int64_t)(v * 1024.0); break;
-        case 'm': bytes = (int64_t)(v * 1024.0 * 1024.0); break;
-        case 'g': bytes = (int64_t)(v * 1024.0 * 1024.0 * 1024.0); break;
-        default:  bytes = (int64_t)v; break;
+        case 'k': mult = 1024.0; break;
+        case 'm': mult = 1024.0 * 1024.0; break;
+        case 'g': mult = 1024.0 * 1024.0 * 1024.0; break;
+        default:  mult = 1.0; break;
     }
-    *out = bytes;
+    if (v * mult > (double)INT64_MAX) return false; // 溢出保护（含单位换算）
+    *out = (int64_t)(v * mult);
     return true;
 }
 

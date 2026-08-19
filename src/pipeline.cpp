@@ -90,7 +90,7 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
             }
         }
 
-        // JPEG 编码（写入临时文件，成功后原子 rename）
+        // JPEG 编码（临时文件 + 原子 rename；EXIF 在副本上写，失败不毁原图）
         JpegOptions jopt;
         jopt.quality = opts.quality;
         jopt.progressive = opts.progressive;
@@ -100,21 +100,49 @@ void processJob(const Job &job, const Options &opts, Summary *summary,
         jopt.maxSize = opts.max_size;
         jopt.tolerancePct = opts.tolerance_pct;
 
-        std::string tmpPath = job.output + ".tmp" + std::to_string((long)getpid());
-        if (!encodeJpeg(img, tmpPath, jopt, &err)) { fail(err); return; }
+        // mkstemp 生成不可预测的临时文件名
+        char tmpl[4096];
+        snprintf(tmpl, sizeof tmpl, "%s.tmpXXXXXX", job.output.c_str());
+        int fd = mkstemp(tmpl);
+        if (fd < 0) { fail("cannot create temp file for output"); return; }
+        close(fd);
+        std::string encPath = tmpl;          // 编码产物
+        std::string exifPath = encPath + ".x"; // EXIF 副本
+
+        if (!encodeJpeg(img, encPath, jopt, &err)) {
+            unlink(encPath.c_str());
+            fail(err);
+            return;
+        }
         auto tEncode = Clock::now();
         if (!err.empty()) warn(err); // encode 成功但带警告（如 max-size 无法满足）
 
-        // EXIF（失败仅告警）
-        std::string exifErr;
-        if (!writeExif(tmpPath, img, &exifErr)) warn("exif: " + exifErr);
+        bool exifOk = false;
+        {
+            std::string exifErr;
+            // 复制后写 EXIF：失败时丢弃副本，仍可用未污染的编码文件
+            if (copyFile(encPath, exifPath, &exifErr)) {
+                if (writeExif(exifPath, img, &exifErr)) {
+                    exifOk = true;
+                } else {
+                    warn("exif: " + exifErr);
+                    unlink(exifPath.c_str());
+                }
+            } else {
+                warn("exif copy: " + exifErr);
+            }
+        }
         auto tExif = Clock::now();
 
-        if (rename(tmpPath.c_str(), job.output.c_str()) != 0) {
+        const char *finalSrc = exifOk ? exifPath.c_str() : encPath.c_str();
+        if (rename(finalSrc, job.output.c_str()) != 0) {
             fail("cannot finalize output: " + errnoMsg() + " (" + job.output + ")");
-            unlink(tmpPath.c_str());
+            unlink(encPath.c_str());
+            unlink(exifPath.c_str());
             return;
         }
+        unlink(encPath.c_str());
+        if (exifOk) unlink(exifPath.c_str());
 
         struct stat st;
         int64_t bytes = 0;

@@ -121,16 +121,17 @@ nef2jpg [选项] <输入...>
   - macOS 上 libjpeg 静态链接（`libjpeg.a`）；exiv2 为动态库，随发布包分发。
 - 尼康 SDK：路径通过 `NIKON_SDK_DIR` 指定（默认 `../Nikon_image/Library/Mac`），仅 macOS 编译；目录缺失时 CMake 直接报错。
 - **自包含打包**：`scripts/fixup_macos.sh` 把 Homebrew 动态依赖（exiv2、brotli、inih、gettext 等）收集进 `lib/` 并把 install name 改写为 `@rpath`，发布包解压即用、不依赖目标机 Homebrew。
-- 发布布局（tar.gz）：
+- 发布布局（tar.gz，本地构建后手动上传 GitHub Release，无 CI）：
   ```
   nef2jpg-<os>-<arch>/
   ├── nef2jpg
   ├── lib/                    SDK 动态库 + Elm.framework + exiv2 及依赖
   ├── Contents/Resources/     prm.bin
+  ├── Profiles/               尼康色彩配置文件（25 个，供 install_profiles.sh）
   ├── scripts/install_profiles.sh
   └── README.md
   ```
-- CI：GitHub Actions 矩阵 `macos-14 (arm64)` + `ubuntu-24.04 (x64)`，产出 tar.gz + sha256，tag push 自动创建 GitHub Release。macOS 构建需通过 workflow 输入/仓库变量提供 SDK 压缩包 URL。
+- 发布流程：`cmake --build build` → 按上述布局打包 → 手动创建 GitHub Release 上传。
 
 ## 7. 里程碑
 

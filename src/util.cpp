@@ -10,7 +10,40 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-std::string errnoMsg() { return std::string(strerror(errno)); }
+std::string errnoMsg() {
+    char buf[256];
+#if defined(__APPLE__) || defined(_POSIX_C_SOURCE) && !defined(_GNU_SOURCE)
+    if (strerror_r(errno, buf, sizeof buf) == 0) return std::string(buf);
+    return "unknown error";
+#else
+    return std::string(strerror_r(errno, buf, sizeof buf));
+#endif
+}
+
+bool copyFile(const std::string &src, const std::string &dst, std::string *err) {
+    FILE *in = fopen(src.c_str(), "rb");
+    if (!in) { if (err) *err = errnoMsg() + ": " + src; return false; }
+    FILE *out = fopen(dst.c_str(), "wb");
+    if (!out) {
+        fclose(in);
+        if (err) *err = errnoMsg() + ": " + dst;
+        return false;
+    }
+    char buf[1 << 16];
+    size_t n;
+    bool ok = true;
+    while ((n = fread(buf, 1, sizeof buf, in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) { ok = false; break; }
+    }
+    if (ferror(in)) ok = false;
+    if (fclose(out) != 0) ok = false;
+    fclose(in);
+    if (!ok) {
+        if (err) *err = "copy failed: " + src + " -> " + dst;
+        return false;
+    }
+    return true;
+}
 
 bool fileExists(const std::string &path) {
     struct stat st;
@@ -75,9 +108,9 @@ static void scanDir(const std::string &dir, bool recursive, int depth,
             }
             case DT_REG: is_directory = false; break;
             case DT_UNKNOWN: {
-                // 不提供 d_type 的文件系统（NFS 等）：回退 stat
+                // 不提供 d_type 的文件系统（NFS 等）：回退 stat（与 DT_LNK 一致，跟随链接）
                 struct stat st;
-                if (lstat(full.c_str(), &st) == 0) {
+                if (stat(full.c_str(), &st) == 0) {
                     if (S_ISDIR(st.st_mode)) is_directory = true;
                     else if (!S_ISREG(st.st_mode)) continue; // 其它类型跳过
                 } else {

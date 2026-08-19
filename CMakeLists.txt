@@ -135,6 +135,7 @@ if(APPLE)
   install(DIRECTORY "$<TARGET_FILE_DIR:nef2jpg>/lib" DESTINATION .)
   install(FILES "$<TARGET_FILE_DIR:nef2jpg>/Contents/Resources/prm.bin"
           DESTINATION Contents/Resources)
+  install(DIRECTORY "${NIKON_SDK_DIR}/Profiles" DESTINATION .)
   install(FILES README.md DESTINATION .)
   install(PROGRAMS scripts/install_profiles.sh DESTINATION scripts)
 else()

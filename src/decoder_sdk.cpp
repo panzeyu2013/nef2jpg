@@ -19,10 +19,11 @@ namespace {
 // 进程级 SDK 库初始化（线程安全，引用计数）
 std::mutex g_libMutex;
 int g_libCount = 0;
+std::string g_swapPath; // mkstemp 创建的 swap 文件路径，CloseLibrary 时清理
 
-// SDK 警告码范围：0x0100-0x01FF（显式白名单，不吞未来新错误码）
+// SDK 警告码白名单（文档 0x0101-0x0115），显式枚举，不吞未来新错误码
 bool isWarningCode(unsigned long code) {
-    return code >= 0x0100 && code <= 0x01FF;
+    return code >= 0x0101 && code <= 0x0115;
 }
 
 std::string hexCode(unsigned long code) {
@@ -48,15 +49,14 @@ unsigned long ensureLibraryOpen() {
         lib.ulVMMemorySize = 2048;
 
     // 用 mkstemp 生成不可预测的 swap 文件名（避免 /tmp 符号链接攻击）
-    {
-        char tmpl[] = "/tmp/NkImgSDK_XXXXXX";
-        int fd = mkstemp(tmpl);
-        if (fd >= 0) {
-            close(fd);
-            snprintf((char *)lib.VMFileInfo, MAX_PATH, "%s", tmpl);
-        } else {
-            snprintf((char *)lib.VMFileInfo, MAX_PATH, "/tmp/NkImgSDK_%d.tmp", (int)getpid());
-        }
+    char tmpl[] = "/tmp/NkImgSDK_XXXXXX";
+    int fd = mkstemp(tmpl);
+    if (fd >= 0) {
+        close(fd);
+        snprintf((char *)lib.VMFileInfo, MAX_PATH, "%s", tmpl);
+        g_swapPath = tmpl;
+    } else {
+        snprintf((char *)lib.VMFileInfo, MAX_PATH, "/tmp/NkImgSDK_%d.tmp", (int)getpid());
     }
 
     unsigned long err = kNkfl_Code_Err_Unexpected;
@@ -82,6 +82,10 @@ void releaseLibrary() {
     if (g_libCount <= 0) return;
     if (--g_libCount == 0) {
         try { Nkfl_Entry(kNkfl_Cmd_CloseLibrary, NULL); } catch (...) {}
+        if (!g_swapPath.empty()) {
+            unlink(g_swapPath.c_str());
+            g_swapPath.clear();
+        }
     }
 }
 
@@ -102,19 +106,40 @@ std::string tagString(unsigned long sid, unsigned long tagId) {
     } catch (...) { return ""; }
 }
 
+// DateTime 标签是 NkflTagParam_DateTime 结构体（不是字符串），单独解析
+std::string dateTimeString(unsigned long sid) {
+    NkflTagDataParam p = {};
+    p.ulSize = sizeof(NkflTagDataParam);
+    p.ulSessionID = sid;
+    p.ulTagID = kNkfl_Tag_DateTime;
+    p.ulTagType = kNkfl_TagType_DateTime;
+    try {
+        if (Nkfl_Entry(kNkfl_Cmd_GetTagData, &p) != kNkfl_Code_None) return "";
+        if (p.ulTagLength != sizeof(NkflTagParam_DateTime)) return "";
+        NkflTagParam_DateTime dt = {};
+        p.pData = &dt;
+        if (Nkfl_Entry(kNkfl_Cmd_GetTagData, &p) != kNkfl_Code_None) return "";
+        if (dt.ulYear == 0 && dt.ulMonth == 0 && dt.ulDay == 0) return "";
+        char b[64];
+        snprintf(b, sizeof b, "%04lu:%02lu:%02lu %02lu:%02lu:%05.2f",
+                 dt.ulYear, dt.ulMonth, dt.ulDay, dt.ulHour, dt.ulMinute, dt.dbSecond);
+        return b;
+    } catch (...) { return ""; }
+}
+
 // 镜头信息（kNkfl_Tag_NkLensInfo 结构）格式化为 "24-70mm f/2.8" 风格字符串
 std::string lensString(unsigned long sid) {
     NkflTagDataParam p = {};
     p.ulSize = sizeof(NkflTagDataParam);
     p.ulSessionID = sid;
     p.ulTagID = kNkfl_Tag_NkLensInfo;
+    p.ulTagType = kNkfl_TagType_LensInfo;
     try {
         if (Nkfl_Entry(kNkfl_Cmd_GetTagData, &p) != kNkfl_Code_None) return "";
-        NkflLensInfo li = {};
         if (p.ulTagLength != sizeof(NkflLensInfo)) return "";
+        NkflLensInfo li = {};
         p.pData = &li;
         if (Nkfl_Entry(kNkfl_Cmd_GetTagData, &p) != kNkfl_Code_None) return "";
-        li.ulSize = sizeof(NkflLensInfo);
         if (li.ulWideLength == 0 && li.ulTeleLength == 0) return "";
         char b[128];
         if (li.ulTeleLength == 0 || li.ulTeleLength == li.ulWideLength) {
@@ -269,7 +294,7 @@ bool SdkDecoder::decode(DecodedImage *out, bool autoOrient, std::string *err) {
     out->orientation = autoOrient ? 1 : (uint16_t)ii.ulOrientation;
 
     // 读取基本 EXIF 文本标签
-    out->date_time = tagString(sid, kNkfl_Tag_DateTime);
+    out->date_time = dateTimeString(sid);
     out->make      = tagString(sid, kNkfl_Tag_Make);
     out->model     = tagString(sid, kNkfl_Tag_Model);
     out->lens      = lensString(sid);
