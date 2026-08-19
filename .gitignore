@@ -3,3 +3,4 @@ build-*/
 *.o
 *.a
 .DS_Store
+*.tar.gz

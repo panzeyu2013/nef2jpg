@@ -41,8 +41,7 @@ done < <(otool -L "$BIN" | awk '/\/opt\/homebrew\/|\/usr\/local\//{print $1}')
 
 # 2) 传递依赖（深度 ≤3 足够：exiv2 → brotli/intl/inih）
 for _ in 1 2 3; do
-  for f in "$LIBDIR"/*.dylib; do
-    [ -e "$f" ] || continue
+  for f in $(find "$LIBDIR" -type f -name '*.dylib'); do
     while IFS= read -r dep; do
       base=$(copy_dep "$dep")
       if [ -n "$base" ] && [ "$base" != "$(basename "$f")" ]; then
@@ -53,16 +52,14 @@ for _ in 1 2 3; do
 done
 
 # 3) 统一 install name 为 @rpath，并修复二进制
-for f in "$LIBDIR"/*.dylib; do
-  [ -e "$f" ] || continue
+for f in $(find "$LIBDIR" -type f -name '*.dylib'); do
   install_name_tool -id "@rpath/$(basename "$f")" "$f" 2>/dev/null || true
 done
 fix_file "$BIN"
 
-# 4) install_name_tool 使旧签名失效：adhoc 重签
+# 4) install_name_tool 使旧签名失效：adhoc 重签（所有 Mach-O，含 Elm 二进制）
 codesign --force --sign - "$BIN" 2>/dev/null || true
-for f in "$LIBDIR"/*.dylib; do
-  [ -e "$f" ] || continue
+for f in $(find "$LIBDIR" -type f -exec sh -c 'file -b "$1" | grep -q Mach-O' _ {} \; -print); do
   codesign --force --sign - "$f" 2>/dev/null || true
 done
 

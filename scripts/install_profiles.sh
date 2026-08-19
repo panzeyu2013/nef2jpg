@@ -21,8 +21,9 @@ if [ ! -d "$SRC" ]; then
   exit 1
 fi
 
-sudo mkdir -p "$DST"
-sudo cp "$SRC"/* "$DST/"
+sudo mkdir -p "$DST" || { echo "error: sudo mkdir failed for $DST" >&2; exit 1; }
+shopt -s nullglob
+sudo cp "$SRC"/* "$DST/" || { echo "error: failed copying profiles to $DST" >&2; exit 1; }
 COUNT=$(ls "$DST" | wc -l | tr -d ' ')
 echo "installed $COUNT profile(s) to $DST"
 if [ "$COUNT" -lt 19 ]; then

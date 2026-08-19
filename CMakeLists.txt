@@ -118,6 +118,8 @@ if(APPLE)
             "$<TARGET_FILE_DIR:nef2jpg>/lib"
     COMMAND ${CMAKE_COMMAND} -E make_directory
             "$<TARGET_FILE_DIR:nef2jpg>/Contents/Resources"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+            "$<TARGET_FILE_DIR:nef2jpg>/lib/Elm.framework"
     COMMAND cp -R "${SDK_LIB_DIR}/Elm.framework" "$<TARGET_FILE_DIR:nef2jpg>/lib/"
     COMMAND ${CMAKE_COMMAND} -E copy
             "${SDK_RES_DIR}/prm.bin"
